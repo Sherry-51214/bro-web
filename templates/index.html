@@ -27,12 +27,39 @@
         }
         .chat-header {
             background: linear-gradient(135deg, #0f3460, #533483);
-            padding: 20px;
+            padding: 15px 20px;
             text-align: center;
             color: white;
         }
         .chat-header h1 { font-size: 24px; font-weight: 700; }
         .chat-header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+        .upload-bar {
+            background: #0a1628;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #533483;
+        }
+        .upload-bar span {
+            color: #a78bfa;
+            font-size: 13px;
+        }
+        #file-input { display: none; }
+        #upload-btn {
+            padding: 8px 16px;
+            background: #533483;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        #upload-btn:hover { opacity: 0.85; }
+        #upload-status {
+            color: #a78bfa;
+            font-size: 12px;
+        }
         .chat-messages {
             flex: 1;
             overflow-y: auto;
@@ -137,17 +164,25 @@
             <h1>🤖 Bro</h1>
             <p>Your Personal AI Best Friend — Coding • Jobs • Business • Anything</p>
         </div>
+        <div class="upload-bar">
+            <span>📄 Feed Bro your documents:</span>
+            <input type="file" id="file-input" accept=".pdf,.txt"/>
+            <button id="upload-btn" onclick="document.getElementById('file-input').click()">
+                Upload Resume / Notes 📎
+            </button>
+            <span id="upload-status"></span>
+        </div>
         <div class="chat-messages" id="chat-messages">
             <div class="welcome-message">
                 <p>👋 Yooo Shehroz! Bro is ready to help you!</p>
-                <p style="margin-top: 8px; font-size: 12px;">Ask me anything — coding, jobs, business ideas, or just chat 😄</p>
+                <p style="margin-top: 8px; font-size: 12px;">Upload your resume or notes above, then ask me anything! 😄</p>
             </div>
         </div>
         <div class="typing" id="typing">Bro is thinking... 🤔</div>
         <div class="chat-input-area">
             <input type="text" id="user-input" placeholder="Talk to Bro..." autocomplete="off"/>
             <button id="send-btn">Send 🚀</button>
-            <button id="clear-btn">Clear Memory 🗑️</button>
+            <button id="clear-btn">Clear 🗑️</button>
         </div>
     </div>
     <script>
@@ -156,6 +191,8 @@
         const sendBtn = document.getElementById('send-btn');
         const clearBtn = document.getElementById('clear-btn');
         const typing = document.getElementById('typing');
+        const fileInput = document.getElementById('file-input');
+        const uploadStatus = document.getElementById('upload-status');
 
         function addMessage(text, isUser) {
             const welcomeMsg = document.querySelector('.welcome-message');
@@ -209,6 +246,30 @@
             sendBtn.disabled = false;
             userInput.focus();
         }
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            uploadStatus.textContent = '⏳ Uploading...';
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.success) {
+                    uploadStatus.textContent = '✅ ' + data.success;
+                } else {
+                    uploadStatus.textContent = '❌ ' + data.error;
+                }
+            } catch (error) {
+                uploadStatus.textContent = '❌ Upload failed!';
+            }
+        });
 
         clearBtn.addEventListener('click', async () => {
             await fetch('/clear', { method: 'POST' });

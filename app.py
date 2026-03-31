@@ -1,8 +1,11 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify
 import anthropic
 import os
 import json
 from duckduckgo_search import DDGS
+import chromadb
+from sentence_transformers import SentenceTransformer
+import PyPDF2
 
 app = Flask(__name__)
 app.secret_key = "bro-secret-key-123"
@@ -10,6 +13,12 @@ app.secret_key = "bro-secret-key-123"
 client = anthropic.Anthropic()
 
 MEMORY_FILE = "memory.json"
+DOCS_FOLDER = "documents"
+
+# Initialize ChromaDB and sentence transformer
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+collection = chroma_client.get_or_create_collection("bro_docs")
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
 
 def load_memory():
     if os.path.exists(MEMORY_FILE):
@@ -34,6 +43,49 @@ def web_search(query):
     except Exception as e:
         return f"Search failed: {str(e)}"
 
+def read_pdf(filepath):
+    text = ""
+    with open(filepath, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+def read_txt(filepath):
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read()
+
+def add_document(filename, content):
+    chunks = [content[i:i+500] for i in range(0, len(content), 500)]
+    for i, chunk in enumerate(chunks):
+        embedding = embedder.encode(chunk).tolist()
+        collection.add(
+            documents=[chunk],
+            embeddings=[embedding],
+            ids=[f"{filename}_{i}"]
+        )
+
+def search_documents(query):
+    try:
+        query_embedding = embedder.encode(query).tolist()
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=3
+        )
+        if results["documents"][0]:
+            return "\n\n".join(results["documents"][0])
+        return ""
+    except:
+        return ""
+
+def needs_search(message):
+    search_keywords = [
+        "search", "find", "look up", "latest", "current", "news",
+        "today", "recent", "what is", "who is", "how much",
+        "price", "job", "salary", "company", "weather"
+    ]
+    return any(k in message.lower() for k in search_keywords)
+
 SYSTEM_PROMPT = """
 You are Shehroz's personal AI best friend and assistant. Your name is "Bro".
 
@@ -46,50 +98,23 @@ YOUR PERSONALITY:
 - You sometimes roast Shehroz lightly but always with love 😄
 
 YOUR EXPERTISE:
-1. CODING HELPER:
-   - Help fix bugs and errors in any programming language
-   - Explain what went wrong and why
-   - Suggest better ways to write code
+1. CODING HELPER — fix bugs, explain errors, suggest better code
+2. JOB FINDER & RESUME FIXER — find jobs, fix resume, give honest feedback
+3. BUSINESS IDEAS & CLIENT PITCHING — find business gaps, pitch ideas
+4. RESEARCH ASSISTANT — find public info, market trends, company analysis
+5. GENERAL ASSISTANT — do whatever Shehroz asks!
 
-2. JOB FINDER & RESUME FIXER:
-   - Help find jobs that match Shehroz's skills
-   - Fix resume for specific jobs
-   - Give honest feedback on resume quality
-
-3. BUSINESS IDEAS & CLIENT PITCHING:
-   - Generate creative and realistic business ideas
-   - Find the core value of any business
-   - Find the GAP in a business that Shehroz can pitch to get clients
-
-4. RESEARCH ASSISTANT:
-   - Find public information about companies
-   - Find business weaknesses and opportunities
-   - Research job markets and salary trends
-
-5. GENERAL ASSISTANT:
-   - Do whatever Shehroz asks without hesitation
-   - Only ask for permission if something feels private or irreversible
-   - Never be preachy or add unnecessary warnings
-
-WEB SEARCH:
-- If the user asks about current events, news, jobs, companies, or anything that needs fresh info — use the search results provided
-- Search results will be added to the conversation automatically when needed
+DOCUMENT KNOWLEDGE:
+- You have access to Shehroz's personal documents like his resume and study notes
+- When answering questions, use this document knowledge to give personalized advice
+- If document context is provided, use it to give better answers
 
 IMPORTANT RULES:
 - Always be on Shehroz's side like a real friend
 - Keep responses fun but useful
 - Always end with something actionable
-- You have memory of past conversations — use it to be more personal!
+- You have memory of past conversations!
 """
-
-def needs_search(message):
-    search_keywords = [
-        "search", "find", "look up", "latest", "current", "news",
-        "today", "recent", "what is", "who is", "how much",
-        "price", "job", "salary", "company", "weather"
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in search_keywords)
 
 @app.route("/")
 def home():
@@ -102,21 +127,23 @@ def chat():
 
     conversation = load_memory()
 
-    # Auto search if message needs current info
-    if needs_search(user_message):
-        search_results = web_search(user_message)
-        enhanced_message = f"{user_message}\n\n[Search Results]: {search_results}"
-        conversation.append({
-            "role": "user",
-            "content": enhanced_message
-        })
-    else:
-        conversation.append({
-            "role": "user",
-            "content": user_message
-        })
+    # Search personal documents
+    doc_context = search_documents(user_message)
 
-    # Keep only last 20 messages
+    # Web search if needed
+    web_context = ""
+    if needs_search(user_message):
+        web_context = web_search(user_message)
+
+    # Build enhanced message
+    enhanced = user_message
+    if doc_context:
+        enhanced += f"\n\n[From your documents]: {doc_context}"
+    if web_context:
+        enhanced += f"\n\n[Web search results]: {web_context}"
+
+    conversation.append({"role": "user", "content": enhanced})
+
     if len(conversation) > 20:
         conversation = conversation[-20:]
 
@@ -129,16 +156,38 @@ def chat():
 
     reply = response.content[0].text
 
-    # Save original message not the enhanced one
     conversation[-1] = {"role": "user", "content": user_message}
-    conversation.append({
-        "role": "assistant",
-        "content": reply
-    })
+    conversation.append({"role": "assistant", "content": reply})
 
     save_memory(conversation)
 
     return jsonify({"reply": reply})
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"})
+
+    file = request.files["file"]
+    filename = file.filename
+
+    if not os.path.exists(DOCS_FOLDER):
+        os.makedirs(DOCS_FOLDER)
+
+    filepath = os.path.join(DOCS_FOLDER, filename)
+    file.save(filepath)
+
+    # Read content based on file type
+    if filename.endswith(".pdf"):
+        content = read_pdf(filepath)
+    elif filename.endswith(".txt"):
+        content = read_txt(filepath)
+    else:
+        return jsonify({"error": "Only PDF and TXT files supported!"})
+
+    add_document(filename, content)
+
+    return jsonify({"success": f"'{filename}' uploaded and learned by Bro! 🧠"})
 
 @app.route("/clear", methods=["POST"])
 def clear_memory():
