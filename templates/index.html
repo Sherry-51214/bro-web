@@ -110,6 +110,16 @@
             cursor: pointer;
         }
         #send-btn:hover { opacity: 0.85; }
+        #clear-btn {
+            padding: 14px 20px;
+            background: transparent;
+            color: #a78bfa;
+            border: 2px solid #533483;
+            border-radius: 30px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #clear-btn:hover { background: #533483; color: white; }
         .welcome-message {
             text-align: center;
             color: #666;
@@ -137,12 +147,14 @@
         <div class="chat-input-area">
             <input type="text" id="user-input" placeholder="Talk to Bro..." autocomplete="off"/>
             <button id="send-btn">Send 🚀</button>
+            <button id="clear-btn">Clear Memory 🗑️</button>
         </div>
     </div>
     <script>
         const messagesDiv = document.getElementById('chat-messages');
         const userInput = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
+        const clearBtn = document.getElementById('clear-btn');
         const typing = document.getElementById('typing');
 
         function addMessage(text, isUser) {
@@ -197,6 +209,14 @@
             sendBtn.disabled = false;
             userInput.focus();
         }
+
+        clearBtn.addEventListener('click', async () => {
+            await fetch('/clear', { method: 'POST' });
+            messagesDiv.innerHTML = `
+                <div class="welcome-message">
+                    <p>🧠 Memory cleared! Fresh start!</p>
+                </div>`;
+        });
 
         sendBtn.addEventListener('click', sendMessage);
         userInput.addEventListener('keypress', (e) => {

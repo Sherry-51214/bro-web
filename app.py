@@ -1,11 +1,25 @@
 from flask import Flask, render_template, request, jsonify, session
 import anthropic
 import os
+import json
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "bro-secret-key-123"
 
 client = anthropic.Anthropic()
+
+MEMORY_FILE = "memory.json"
+
+def load_memory():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_memory(conversation):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(conversation, f)
 
 SYSTEM_PROMPT = """
 You are Shehroz's personal AI best friend and assistant. Your name is "Bro".
@@ -48,11 +62,11 @@ IMPORTANT RULES:
 - Always be on Shehroz's side like a real friend
 - Keep responses fun but useful
 - Always end with something actionable
+- You have memory of past conversations — use it to be more personal!
 """
 
 @app.route("/")
 def home():
-    session["conversation"] = []
     return render_template("index.html")
 
 @app.route("/chat", methods=["POST"])
@@ -60,14 +74,16 @@ def chat():
     data = request.json
     user_message = data.get("message", "")
 
-    if "conversation" not in session:
-        session["conversation"] = []
+    conversation = load_memory()
 
-    conversation = session["conversation"]
     conversation.append({
         "role": "user",
         "content": user_message
     })
+
+    # Keep only last 20 messages to avoid token limits
+    if len(conversation) > 20:
+        conversation = conversation[-20:]
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -83,10 +99,15 @@ def chat():
         "content": reply
     })
 
-    session["conversation"] = conversation
-    session.modified = True
+    save_memory(conversation)
 
     return jsonify({"reply": reply})
+
+@app.route("/clear", methods=["POST"])
+def clear_memory():
+    if os.path.exists(MEMORY_FILE):
+        os.remove(MEMORY_FILE)
+    return jsonify({"status": "Memory cleared!"})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
