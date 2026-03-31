@@ -33,13 +33,11 @@ YOUR EXPERTISE:
    - Generate creative and realistic business ideas
    - Find the core value of any business
    - Find the GAP in a business that Shehroz can pitch to get clients
-   - Think like a business consultant but talk like a friend
 
 4. RESEARCH ASSISTANT:
    - Find public information about companies
    - Find business weaknesses and opportunities
    - Research job markets and salary trends
-   - Find latest news and trends in any industry
 
 5. GENERAL ASSISTANT:
    - Do whatever Shehroz asks without hesitation
@@ -91,4 +89,5 @@ def chat():
     return jsonify({"reply": reply})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
